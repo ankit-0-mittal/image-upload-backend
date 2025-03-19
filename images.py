@@ -1,29 +1,52 @@
+import cloudinary
+import cloudinary.uploader
 from flask import Blueprint, request, jsonify
-from firebase_admin import storage
-from flask_login import login_required
+from flask_sqlalchemy import SQLAlchemy
+from flask_cors import cross_origin 
+from users import db
+
+# ✅ Configure Cloudinary (Replace with your credentials)
+cloudinary.config(
+    cloud_name="df4qtnblk",
+    api_key="642551397459726",
+    api_secret="ma34qrTLqMmnmwPPgtd-L5tNxe8"
+)
 
 # Blueprint for image management
 image_bp = Blueprint('images', __name__)
 
+# Image model for PostgreSQL
+class Image(db.Model):
+    __tablename__ = 'images'
+    id = db.Column(db.Integer, primary_key=True)
+    filename = db.Column(db.String(150), nullable=False)
+    url = db.Column(db.String(255), nullable=False)
+
 @image_bp.route('/upload', methods=['POST'])
-@login_required
+@cross_origin() 
 def upload_image():
-    file = request.files['file']
+    file = request.files.get('file')
     if not file:
         return jsonify({"message": "No file provided!"}), 400
-    
-    # Upload to Firebase Storage
-    bucket = storage.bucket()
-    blob = bucket.blob(file.filename)
-    blob.upload_from_file(file)
-    
-    return jsonify({"message": "Image uploaded successfully!"}), 201
 
-@image_bp.route('/images', methods=['GET'])
-@login_required
+    # ✅ Upload to Cloudinary
+    upload_result = cloudinary.uploader.upload(file)
+
+    # ✅ Get the Cloudinary URL
+    image_url = upload_result.get("secure_url")
+
+    # ✅ Save metadata to PostgreSQL
+    new_image = Image(filename=file.filename, url=image_url)
+    db.session.add(new_image)
+    db.session.commit()
+
+    return jsonify({"message": "Upload successful!", "url": image_url}), 201
+
+@image_bp.route('/list', methods=['GET'])
+@cross_origin() 
 def list_images():
-    bucket = storage.bucket()
-    blobs = bucket.list_blobs()
-    image_urls = [blob.public_url for blob in blobs]
-    
+    # Retrieve image metadata from PostgreSQL
+    images = Image.query.all()
+    image_urls = [{'filename': img.filename, 'url': img.url} for img in images]
+
     return jsonify({"images": image_urls}), 200
